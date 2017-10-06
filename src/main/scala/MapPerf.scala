@@ -8,8 +8,18 @@ import scala.collection.immutable.HashMap.{HashMap1, HashTrieMap}
 object MapPerf {
 
   def main(args: Array[String]): Unit = {
-    val hashMap = apply("a" -> 1, "b" -> 2, "c" -> 3, "d" -> 4)
-    println(hashMap)
+    val tests = Seq[Seq[(String,Int)]](
+      Seq("a" -> 1),
+      Seq("a" -> 1, "b" -> 2, "c" -> 3, "d" -> 4),
+      Seq("a" -> 1, "b" -> 2, "c" -> 3, "d" -> 4, "d" -> 44)
+    )
+
+    for (test <- tests) {
+      println(s"Testing $test")
+      val slow = Map.apply(test: _*)
+      val fast = apply(test: _*)
+      assert(slow == fast, s"$slow != $fast")
+    }
   }
 
   protected final def improve(hcode: Int): Int = {
@@ -88,15 +98,23 @@ object MapPerf {
 
   def apply[K,V](elems: (K, V)*): HashMap[K,V] = {
 
-    println("Calculating hashAndIndex array")
+    //println("Calculating hashAndIndex array")
 
-    // PERF: Handroll
-    val hashAndIndex: Array[Long] = elems.zipWithIndex.map { case ((key, value), index) =>
-      val hash = improve(key.hashCode)
-      val x = (hash.toLong << 32) | index
-      println(s"Storing ${hash.toHexString}, $index as $x")
-      x
-    }.toArray
+    val numElems = elems.length
+
+    val hashAndIndex: Array[Long] = {
+      val arr = new Array[Long](numElems)
+      var i = 0
+      while (i < numElems) {
+        val key = elems(i)._1
+        val hash = improve(key.hashCode)
+        val x = (hash.toLong << 32) | i
+        println(s"Storing ${hash.toHexString}, $i as $x")
+        arr(i) = x
+        i += 1
+      }
+      arr
+    }
 
     Arrays.sort(hashAndIndex)
 
@@ -105,88 +123,127 @@ object MapPerf {
     var i = 0
 
     def createHashMap(level: Int): HashMap[K,V] = {
-      var prefix = -1
-      def debug(msg: String): Unit = {
-        println(s"${prefix.toHexString}, $level, $i: $msg")
-      }
+      if (level < 32) {
 
-      debug(s"Called createHashMap($level) at index $i")
-      val start = i
-      var bitmap = 0
-      val prefixMask = (1 << level) - 1
-      debug(s"Prefix mask is ${prefixMask.toHexString}")
+        var prefix = -1
 
-      prefix = {
-        val hash = (hashAndIndex(i) >>> 32).toInt
-        debug(s"First child hash is ${hash.toHexString}")
-        hash & prefixMask
-      }
-      debug(s"Prefix is ${prefix.toHexString}")
-
-      // Get bitmap for children
-
-      val childLevel = level + 5
-
-      @tailrec
-      def populateBitmap(): Unit = {
-        if (i < hashAndIndex.size) {
-          val childHash = (hashAndIndex(i) >>> 32).toInt
-          debug(s"Scanning child ${childHash.toHexString}")
-          if (((childHash & prefixMask) ^ prefix) == 0) {
-            debug(s"Child ${childHash.toHexString} matches prefix")
-            val index = (childHash >>> childLevel) & 0x1f
-            debug(s"Child index in bitmap is $index")
-            bitmap |= (1 << index)
-            if (bitmap != -1) {
-              i += 1
-              populateBitmap()
-            }
-          }
+        def debug(msg: String): Unit = {
+          println(s"${prefix.toHexString}, $level, $i: $msg")
         }
-      }
 
-      populateBitmap()
+        debug(s"Called createHashMap($level) at index $i")
+        val start = i
+        var bitmap = 0
+        val prefixMask = (1 << level) - 1
+        debug(s"Prefix mask is ${prefixMask.toHexString}")
 
-      i = start
+        prefix = {
+          val hash = (hashAndIndex(i) >>> 32).toInt
+          debug(s"First child hash is ${hash.toHexString}")
+          hash & prefixMask
+        }
+        debug(s"Prefix is ${prefix.toHexString}")
 
-      // Create hash
+        // Get bitmap for children
 
-      val childCount = Integer.bitCount(bitmap)
-      debug(s"Child count for prefix ${prefix.toHexString} is $childCount")
-      if (childCount == 1) {
-        val childHashAndIndex = hashAndIndex(i)
-        val hash = (childHashAndIndex >>> 32).toInt
-        val elemsIndex = childHashAndIndex.toInt
-        val kv = elems(elemsIndex)
-        i += 1
-        new HashMap1[K,V](kv._1, hash, kv._2, kv)
-      } else {
-        val childArray = new Array[HashMap[K,V]](childCount)
-        var size = 0
+        val childLevel = level + 5
 
         @tailrec
-        def addChildren(): Unit = {
-          if (i < hashAndIndex.size) {
+        def populateBitmap(): Unit = {
+          if (i < numElems) {
             val childHash = (hashAndIndex(i) >>> 32).toInt
-            debug(s"Child hash is ${childHash.toHexString}")
+            debug(s"Scanning child ${childHash.toHexString}")
             if (((childHash & prefixMask) ^ prefix) == 0) {
+              debug(s"Child ${childHash.toHexString} matches prefix")
               val index = (childHash >>> childLevel) & 0x1f
-              debug(s"Child ${childHash.toHexString} index in bitmap is $index")
-              val offset = Integer.bitCount(bitmap & ((1 << index) - 1))
-              debug(s"Child ${childHash.toHexString} index in array is $offset")
-              val childHashMap = createHashMap(childLevel)
-              debug(s"Got child ${childHash.toHexString} HashMap: $childHashMap")
-              childArray(offset) = childHashMap
-              size += childHashMap.size
-              addChildren()
+              debug(s"Child index in bitmap is $index")
+              bitmap |= (1 << index)
+              if (bitmap != -1) {
+                i += 1
+                populateBitmap()
+              }
             }
           }
         }
-        addChildren()
 
-        new HashTrieMap[K,V](bitmap, childArray, size)
+        populateBitmap()
+
+        i = start
+
+        // Create hash
+
+        val childCount = Integer.bitCount(bitmap)
+        debug(s"Child count for prefix ${prefix.toHexString} is $childCount")
+        if (childCount == 1) {
+          createHashMap(childLevel)
+        } else {
+          val childArray = new Array[HashMap[K, V]](childCount)
+          var size = 0
+
+          @tailrec
+          def addChildren(): Unit = {
+            if (i < numElems) {
+              val childHash = (hashAndIndex(i) >>> 32).toInt
+              debug(s"Child hash is ${childHash.toHexString}")
+              if (((childHash & prefixMask) ^ prefix) == 0) {
+                val index = (childHash >>> childLevel) & 0x1f
+                debug(s"Child ${childHash.toHexString} index in bitmap is $index")
+                val offset = Integer.bitCount(bitmap & ((1 << index) - 1))
+                debug(s"Child ${childHash.toHexString} index in array is $offset")
+                val childHashMap = createHashMap(childLevel)
+                debug(s"Got child ${childHash.toHexString} HashMap: $childHashMap")
+                childArray(offset) = childHashMap
+                size += childHashMap.size
+                addChildren()
+              }
+            }
+          }
+
+          addChildren()
+
+          new HashTrieMap[K, V](bitmap, childArray, size)
+        }
+
+      } else {
+
+        // At level >= 32 we handle items with the same hash.
+        // We need to keep items with the same hash, but replace
+        // items with the same key.
+
+        val hash = (hashAndIndex(i) >>> 32).toInt
+
+        def debug(msg: String): Unit = {
+          println(s"${hash.toHexString}, $level!!, $i: $msg")
+        }
+        debug(s"Creating map at level >= 32")
+
+        var acc: HashMap[K, V] = null
+
+        @tailrec
+        def joinElemsWithHash(): Unit = {
+          if (i < numElems) {
+            val childHashAndIndex = hashAndIndex(i)
+            val childHash = (childHashAndIndex >>> 32).toInt
+            debug(s"Scanning element with hash ${childHash.toHexString}")
+            if (childHash == hash) {
+              val elemsIndex = childHashAndIndex.toInt
+              val kv = elems(elemsIndex)
+              if (acc == null) {
+                debug(s"Creating new HashMap1")
+                acc = new HashMap1[K, V](kv._1, childHash, kv._2, kv)
+              } else {
+                debug(s"Adding to existing HashMap")
+                acc = acc.updated0(kv._1, childHash, level, kv._2, kv, null)
+              }
+              i += 1
+              joinElemsWithHash()
+            }
+          }
+        }
+
+        joinElemsWithHash()
+        acc
       }
-
     }
 
     val r = createHashMap(0)
