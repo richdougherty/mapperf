@@ -3,22 +3,50 @@ package scala.collection.immutable
 import java.util.Arrays
 
 import scala.annotation.tailrec
-import scala.collection.immutable.HashMap.{HashMap1, HashTrieMap}
+import scala.collection.immutable.HashMap.{HashMap1, HashMapCollision1, HashTrieMap}
 
 object MapPerf {
 
   def main(args: Array[String]): Unit = {
     val tests = Seq[Seq[(String,Int)]](
       Seq("a" -> 1),
+      Seq("a" -> 1, "b" -> 2),
+      Seq("1" -> 1, "6" -> 6),
       Seq("a" -> 1, "b" -> 2, "c" -> 3, "d" -> 4),
-      Seq("a" -> 1, "b" -> 2, "c" -> 3, "d" -> 4, "d" -> 44)
+      Seq("a" -> 1, "b" -> 2, "c" -> 3, "d" -> 4, "d" -> 44),
+      (0 until 7).map(i => (i.toString -> i))
     )
 
     for (test <- tests) {
-      println(s"Testing $test")
-      val slow = Map.apply(test: _*)
+      println(s"------ Testing $test ------")
+      //val slow = Map.apply(test: _*)
+      val slow: HashMap[String, Int] = ((new HashMap) ++ (test)).asInstanceOf[HashMap[String, Int]]
       val fast = apply(test: _*)
-      assert(slow == fast, s"$slow != $fast")
+      println("slow:")
+      printHashMap(slow)
+      println(s"fast: $fast")
+      printHashMap(fast)
+      assert(slow.size == fast.size, s"fast.size -> ${fast.size}")
+      for ((k,_) <- test) {
+        assert(slow.get(k) == fast.get(k), s"fast.get($k) -> ${fast.get(k)}")
+      }
+    }
+  }
+
+  def printHashMap(hm: HashMap[_,_], indent: String = ""): Unit = {
+    print(indent)
+    hm match {
+      case hm1: HashMap1[_, _] =>
+        println(s"HashMap1(${hm1.hash.toHexString}, ${hm1.key} -> ${hm1.value})")
+      case htm: HashTrieMap[_, _] =>
+        println(s"HashTrieMap(bitmap = ${htm.bitmap.toHexString}, size = ${htm.size}):")
+        for (elem <- htm.elems) {
+          printHashMap(elem, indent = indent + "- ")
+        }
+      case hmc1: HashMapCollision1[_, _] =>
+        println(s"HashMapCollision1(${hmc1.hash.toHexString}, ${hmc1.kvs})")
+      case _: HashMap[_, _] if hm.isEmpty =>
+        println("HashMap")
     }
   }
 
@@ -109,7 +137,7 @@ object MapPerf {
         val key = elems(i)._1
         val hash = improve(key.hashCode)
         val x = (hash.toLong << 32) | i
-        println(s"Storing ${hash.toHexString}, $i as $x")
+        println(s"Storing ${hash.toHexString}, $i as ${x.toHexString}")
         arr(i) = x
         i += 1
       }
@@ -118,7 +146,7 @@ object MapPerf {
 
     Arrays.sort(hashAndIndex)
 
-    println(s"Sorted hashAndIndex array: ${hashAndIndex.mkString}")
+    println(s"Sorted hashAndIndex array: ${hashAndIndex.map(_.toHexString).mkString(", ")}")
 
     var i = 0
 
@@ -146,7 +174,8 @@ object MapPerf {
 
         // Get bitmap for children
 
-        val childLevel = level + 5
+//        val childLevel = level + 5
+        //val childMask = ((1 << 5) - 1) << childLevel
 
         @tailrec
         def populateBitmap(): Unit = {
@@ -155,7 +184,7 @@ object MapPerf {
             debug(s"Scanning child ${childHash.toHexString}")
             if (((childHash & prefixMask) ^ prefix) == 0) {
               debug(s"Child ${childHash.toHexString} matches prefix")
-              val index = (childHash >>> childLevel) & 0x1f
+              val index = (childHash >>> level) & 0x1f
               debug(s"Child index in bitmap is $index")
               bitmap |= (1 << index)
               if (bitmap != -1) {
@@ -175,7 +204,7 @@ object MapPerf {
         val childCount = Integer.bitCount(bitmap)
         debug(s"Child count for prefix ${prefix.toHexString} is $childCount")
         if (childCount == 1) {
-          createHashMap(childLevel)
+          createHashMap(level + 5)
         } else {
           val childArray = new Array[HashMap[K, V]](childCount)
           var size = 0
@@ -186,11 +215,11 @@ object MapPerf {
               val childHash = (hashAndIndex(i) >>> 32).toInt
               debug(s"Child hash is ${childHash.toHexString}")
               if (((childHash & prefixMask) ^ prefix) == 0) {
-                val index = (childHash >>> childLevel) & 0x1f
+                val index = (childHash >>> level) & 0x1f
                 debug(s"Child ${childHash.toHexString} index in bitmap is $index")
                 val offset = Integer.bitCount(bitmap & ((1 << index) - 1))
                 debug(s"Child ${childHash.toHexString} index in array is $offset")
-                val childHashMap = createHashMap(childLevel)
+                val childHashMap = createHashMap(level + 5)
                 debug(s"Got child ${childHash.toHexString} HashMap: $childHashMap")
                 childArray(offset) = childHashMap
                 size += childHashMap.size
