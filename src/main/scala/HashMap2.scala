@@ -31,36 +31,48 @@ final class MapBuilder2[A, B]
 
   private var hashMap: HashMap2[A,B] = _
 
-  def +=(x: (A, B)): this.type = {
+  override def sizeHint(hint: Int): Unit = {
+    sizeHint = hint
+  }
+
+  override def +=(x: (A, B)): this.type = {
     val h = x.hashCode
 
-    def update1(): Boolean = {
+    def tryUpdateMap1(): Boolean = {
       if (h == hash1 && x == kv1) {
         hash1 = h
         kv1 = x
         true
       } else false
     }
-    def update2(): Boolean = {
-      if (update1()) true else if (h == hash2 && x == kv2) {
+    def tryUpdateMap2(): Boolean = {
+      if (tryUpdateMap1()) true else if (h == hash2 && x == kv2) {
         hash2 = h
         kv2 = x
         true
       } else false
     }
-    def update3(): Boolean = {
-      if (update2()) true else if (h == hash3 && x == kv3) {
+    def tryUpdateMap3(): Boolean = {
+      if (tryUpdateMap2()) true else if (h == hash3 && x == kv3) {
         hash3 = h
         kv3 = x
         true
       } else false
     }
-    def update4(): Boolean = {
-      if (update3()) true else if (h == hash4 && x == kv4) {
+    def tryUpdateMap4(): Boolean = {
+      if (tryUpdateMap3()) true else if (h == hash4 && x == kv4) {
         hash4 = h
         kv4 = x
         true
       } else false
+    }
+    def updateHashMap(hashCode: Int, keyValue: (A, B)): Unit = {
+      val key = keyValue._1
+      val value = keyValue._2
+      val improvedHash = HashMap2.improveHashCode(hashCode) // TODO: Move computeHash to companion?
+      val remainingUpdates = Math.min(0, sizeHint - size)
+      hashMap = hashMap.updated0(key, improvedHash, level = 0, value, keyValue, mutUpdates = remainingUpdates, merger = null)
+      size += 1
     }
 
     size match {
@@ -70,43 +82,43 @@ final class MapBuilder2[A, B]
         kv1 = x
       case 1 =>
         assert(kv1 != null)
-        if (!update1()) {
+        if (!tryUpdateMap1()) {
           size = 2
           hash2 = h
           kv2 = x
         }
       case 2 =>
         assert(kv1 != null && kv2 != null)
-        if (!update2()) {
+        if (!tryUpdateMap2()) {
           size = 3
           hash3 = h
           kv3 = x
         }
       case 3 =>
         assert(kv1 != null && kv2 != null && kv3 != null)
-        if (!update3()) {
+        if (!tryUpdateMap3()) {
           size = 4
           hash4 = h
           kv4 = x
         }
       case 4 =>
         assert(kv1 != null && kv2 != null && kv3 != null && kv4 != null, s"$kv1, $kv2, $kv3, $kv4")
-        if (!update4()) {
+        if (!tryUpdateMap4()) {
           // Convert to a HashMap
           size = 0 // Set to 0 since appends will increment this
           hashMap = HashMap2.empty
           // Move existing values to hashMap
           // Note: for performance don't clear hash1-4
-          hashMapAppend(kv1)
-          hashMapAppend(kv2)
-          hashMapAppend(kv3)
-          hashMapAppend(kv4)
+          updateHashMap(hash1, kv1)
+          updateHashMap(hash2, kv2)
+          updateHashMap(hash3, kv3)
+          updateHashMap(hash4, kv4)
           kv1 = null
           kv2 = null
           kv3 = null
           kv4 = null
           // Add new value to HashMap
-          hashMapAppend(x)
+          updateHashMap(h, x)
         }
       case _ =>
         if (hashMap == null) {
@@ -118,14 +130,7 @@ final class MapBuilder2[A, B]
     this
   }
 
-  private def hashMapAppend(keyValue: (A, B)): Unit = {
-    val key = keyValue._1
-    val value = keyValue._2
-    val internalHash = hashMap.computeHash(key) // TODO: Move computeHash to companion?
-    val remaining = Math.max(0, sizeHint - size)
-    hashMap = hashMap.updated0(key, internalHash, level = 0, value, keyValue, mutUpdates = remaining, merger = null)
-    size += 1
-  }
+
 
   def clear() {
     size = 0
@@ -259,13 +264,8 @@ sealed class HashMap2[A, +B] extends AbstractMap[A, B]
 
   protected def elemHashCode(key: A) = key.##
 
-  // TODO: Make this private?
-  protected final def improve(hcode: Int) = {
-    var h: Int = hcode + ~(hcode << 9)
-    h = h ^ (h >>> 14)
-    h = h + (h << 4)
-    h ^ (h >>> 10)
-  }
+  // TODO: Make this private/move to companion object?
+  protected final def improve(hcode: Int) = HashMap2.improveHashCode(hcode)
 
   // TODO: Make this a method on the companion object?
   private[collection] def computeHash(key: A) = improve(elemHashCode(key))
@@ -330,6 +330,14 @@ sealed class HashMap2[A, +B] extends AbstractMap[A, B]
  *  @since   2.3
  */
 object HashMap2 extends ImmutableMapFactory[HashMap2] with BitOperations.Int {
+
+  private[collection] def improveHashCode(hcode: Int) = {
+    var h: Int = hcode + ~(hcode << 9)
+    h = h ^ (h >>> 14)
+    h = h + (h << 4)
+    h ^ (h >>> 10)
+  }
+
 
   private[collection] abstract class Merger[A, B] {
     def apply(kv1: (A, B), kv2: (A, B)): (A, B)
