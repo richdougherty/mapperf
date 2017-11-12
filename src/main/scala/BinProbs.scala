@@ -83,7 +83,7 @@ object BinProbs {
           insertions += 1
           findInsertionsForNewSize(newSize)
         } else {
-          println(s"$sampledNewSize (${sampledNewSize - percentile(samples, 0.25)})")
+          //println(s"$sampledNewSize (${sampledNewSize - percentile(samples, 0.25)})")
         }
       }
 

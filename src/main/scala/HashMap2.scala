@@ -10,8 +10,10 @@ package scala
 package collection
 package immutable
 
+import scala.annotation.tailrec
 import scala.annotation.unchecked.{uncheckedVariance => uV}
 import scala.collection.generic._
+import scala.collection.immutable.HashMap.Int
 import scala.collection.immutable.Map.{Map1, Map2, Map3, Map4}
 
 
@@ -369,6 +371,61 @@ object HashMap2 extends ImmutableMapFactory[HashMap2] with BitOperations.Int {
     override def tail: HashMap2[Any, Nothing] = throw new NoSuchElementException("Empty Map")
   }
 
+  private val countTable: Array[Array[Int]] = Array(
+    Array(1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 15, 16, 18, 20, 21, 23, 25, 27, 30, 32, 35, 38, 41, 45, 50, 55, 61, 69, 81, 102),
+    Array(1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 14, 15, 17, 19, 20, 22, 24, 26, 29, 31, 34, 37, 41, 44, 49, 54, 61, 69, 80, 102),
+    Array(1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 13, 14, 16, 18, 19, 21, 23, 25, 28, 30, 33, 36, 39, 43, 48, 53, 60, 68, 80, 101),
+    Array(1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 13, 15, 16, 18, 20, 22, 24, 27, 29, 32, 35, 38, 42, 47, 52, 58, 67, 78, 99),
+    Array(1, 2, 3, 4, 5, 6, 8, 9, 11, 12, 14, 15, 17, 19, 21, 23, 26, 28, 31, 34, 37, 41, 46, 51, 57, 66, 77, 97),
+    Array(1, 2, 3, 4, 5, 7, 8, 9, 11, 13, 14, 16, 18, 20, 22, 24, 27, 30, 33, 36, 40, 44, 50, 56, 64, 76, 97),
+    Array(1, 2, 3, 4, 6, 7, 8, 10, 11, 13, 15, 17, 19, 21, 23, 26, 28, 32, 35, 39, 43, 49, 55, 63, 75, 96),
+    Array(1, 2, 3, 4, 6, 7, 9, 10, 12, 14, 16, 17, 20, 22, 25, 27, 30, 34, 38, 42, 47, 54, 62, 73, 95),
+    Array(1, 2, 3, 4, 6, 7, 9, 11, 12, 14, 16, 18, 21, 23, 26, 29, 33, 36, 41, 46, 52, 61, 72, 93),
+    Array(1, 2, 3, 5, 6, 8, 9, 11, 13, 15, 17, 19, 22, 25, 28, 31, 35, 40, 45, 51, 59, 71, 92),
+    Array(1, 2, 3, 5, 6, 8, 10, 12, 14, 16, 18, 21, 23, 27, 30, 34, 38, 43, 50, 58, 70, 91),
+    Array(1, 2, 4, 5, 7, 8, 10, 12, 14, 17, 19, 22, 25, 28, 32, 37, 42, 48, 57, 68, 89),
+    Array(1, 2, 4, 5, 7, 9, 11, 13, 15, 18, 20, 23, 27, 31, 35, 40, 47, 55, 67, 87),
+    Array(1, 2, 4, 6, 7, 9, 11, 14, 16, 19, 22, 25, 29, 33, 39, 45, 54, 65, 86),
+    Array(1, 2, 4, 6, 8, 10, 12, 15, 17, 20, 24, 27, 32, 37, 44, 52, 63, 84),
+    Array(1, 2, 4, 6, 8, 10, 13, 16, 19, 22, 26, 30, 35, 42, 50, 62, 83),
+    Array(1, 3, 4, 6, 9, 11, 14, 17, 20, 24, 28, 34, 40, 48, 60, 80),
+    Array(1, 3, 5, 7, 9, 12, 15, 18, 22, 26, 32, 38, 46, 58, 78),
+    Array(1, 3, 5, 7, 10, 13, 16, 20, 24, 30, 36, 44, 56, 76),
+    Array(1, 3, 5, 8, 11, 14, 18, 22, 27, 34, 42, 54, 75),
+    Array(1, 3, 6, 9, 12, 16, 20, 25, 31, 40, 51, 72),
+    Array(1, 3, 6, 9, 13, 17, 22, 29, 37, 49, 69),
+    Array(1, 4, 7, 10, 15, 20, 26, 34, 46, 67),
+    Array(1, 4, 8, 12, 17, 23, 31, 43, 64),
+    Array(2, 5, 9, 13, 20, 28, 39, 60),
+    Array(2, 5, 10, 16, 24, 35, 56),
+    Array(2, 6, 12, 20, 31, 52),
+    Array(2, 7, 15, 26, 46),
+    Array(3, 9, 20, 40),
+    Array(3, 13, 32),
+    Array(5, 23),
+    Array(10)
+  )
+
+  private[immutable] def predictCount(existingCount: Int, updatesRemaining: Int): Int = {
+    if (existingCount == 32) 32 else {
+      val row: Array[Int] = countTable(existingCount)
+
+      @tailrec
+      def scan(column: Int): Int = {
+        if (column >= row.length) 32 else {
+          val minUpdates: Int = row(column)
+          if (updatesRemaining >= minUpdates) {
+            existingCount + column + 1
+          } else {
+            scan(column + 1)
+          }
+        }
+      }
+
+      scan(0)
+    }
+  }
+
   /**
    * Utility method to create a HashTrieMap from two leaf HashMaps (HashMap1 or HashMapCollision1) with non-colliding hash code).
    *
@@ -382,11 +439,14 @@ object HashMap2 extends ImmutableMapFactory[HashMap2] with BitOperations.Int {
    * @param mutUpdates TODO TODO TODO
    */
   private def makeHashTrieMap[A, B](hash0:Int, elem0:HashMap2[A, B], hash1:Int, elem1:HashMap2[A, B], level:Int, size:Int, mutUpdates: Int) : HashTrieMap[A, B] = {
+    val mutUpdatesAtLevel = mutUpdates >> level // Roughly how many updates we expect at this level
+
     val index0 = (hash0 >>> level) & 0x1f
     val index1 = (hash1 >>> level) & 0x1f
     if(index0 != index1) {
+      val predictedElems = HashMap2.predictCount(2, mutUpdatesAtLevel)
       val bitmap = (1 << index0) | (1 << index1)
-      val elems = new Array[HashMap2[A,B]](2)
+      val elems = new Array[HashMap2[A,B]](predictedElems)
       if(index0 < index1) {
         elems(0) = elem0
         elems(1) = elem1
@@ -394,11 +454,10 @@ object HashMap2 extends ImmutableMapFactory[HashMap2] with BitOperations.Int {
         elems(0) = elem1
         elems(1) = elem0
       }
-      val mutUpdatesAtLevel = mutUpdates >> level
-      val estimatedSize = size // TODO: Optimize this
       new HashTrieMap[A, B](bitmap, elems, size)
     } else {
-      val elems = new Array[HashMap2[A,B]](1)
+      val predictedElems = HashMap2.predictCount(1, mutUpdatesAtLevel)
+      val elems = new Array[HashMap2[A,B]](predictedElems)
       val bitmap = (1 << index0)
       elems(0) = makeHashTrieMap(hash0, elem0, hash1, elem1, level + 5, size, mutUpdates)
       new HashTrieMap[A, B](bitmap, elems, size)
@@ -529,7 +588,7 @@ object HashMap2 extends ImmutableMapFactory[HashMap2] with BitOperations.Int {
   class HashTrieMap[A, +B](
     private[collection] val bitmap: Int,
     private[collection] val elems: Array[HashMap2[A, B @uV]],
-    private[collection] val size0: Int
+    private[collection] var size0: Int
   ) extends HashMap2[A, B @uV] {
 
     // assert(Integer.bitCount(bitmap) == elems.length)
@@ -588,21 +647,55 @@ object HashMap2 extends ImmutableMapFactory[HashMap2] with BitOperations.Int {
           this
         } else {
           // The child HashMap at that index has changed.
-          // TODO: Mutable update.
-          val elemsNew = new Array[HashMap2[A,B1]](elems.length)
-          Array.copy(elems, 0, elemsNew, 0, elems.length)
-          elemsNew(offset) = subNew
-          new HashTrieMap(bitmap, elemsNew, size + (subNew.size - sub.size))
+          val sizeNew = size + (subNew.size - sub.size)
+          if (mutUpdates == -1) {
+            // This HashMap is immutable; return a modified copy
+            val elemsNew = new Array[HashMap2[A,B1]](elems.length)
+            Array.copy(elems, 0, elemsNew, 0, elems.length)
+            elemsNew(offset) = subNew
+            new HashTrieMap(bitmap, elemsNew, sizeNew)
+          } else {
+            // This HashMap is mutable; modify its size and array directly
+            size0 = sizeNew
+            val elemsNew = elems.asInstanceOf[Array[HashMap2[A,B1]]]
+            elemsNew(offset) = subNew
+            this
+          }
         }
       } else {
-        // There is a free space at `index`. Create a new HashMap1 and store it at that location.
-        // TODO: Mutable update.
-        // TODO: Estimate size.
-        val elemsNew = new Array[HashMap2[A,B1]](elems.length + 1)
-        Array.copy(elems, 0, elemsNew, 0, offset)
-        elemsNew(offset) = new HashMap1(key, hash, value, kv)
-        Array.copy(elems, offset, elemsNew, offset + 1, elems.length - offset)
-        new HashTrieMap(bitmap | mask, elemsNew, size + 1)
+        // There is a free space at `index`.
+        if (mutUpdates == -1) {
+          // Updating an immutable HashMap. Create a new HashMap1 and store it at that location.
+          val elemsNew = new Array[HashMap2[A,B1]](elems.length + 1)
+          Array.copy(elems, 0, elemsNew, 0, offset)
+          elemsNew(offset) = new HashMap1(key, hash, value, kv)
+          Array.copy(elems, offset, elemsNew, offset + 1, elems.length - offset)
+          new HashTrieMap(bitmap | mask, elemsNew, size + 1)
+        } else {
+          // Updating a mutable HashMap. Update the existing array if there's space,
+          // otherwise allocate a new array.
+          val elemsUsed = Integer.bitCount(bitmap)
+          val elemsNeeded = elemsUsed + 1
+          if (elemsNeeded < elems.length) {
+            // There is space to update the existing array. Move the exising elements
+            // to make space, then add the new element.
+            //System.err.println(s"${elems.length}, $elemsUsed, $offset")
+            Array.copy(elems, offset, elems, offset + 1, elemsUsed - offset)
+            val elemsNew = elems.asInstanceOf[Array[HashMap2[A,B1]]]
+            elemsNew(offset) = new HashMap1(key, hash, value, kv)
+            size0 = size + 1
+            this
+          } else {
+            // We need to allocate a new array.
+            val mutUpdatesAtLevel = mutUpdates >> level
+            val newElemsSize = HashMap2.predictCount(elemsNeeded, mutUpdatesAtLevel)
+            val elemsNew = new Array[HashMap2[A,B1]](newElemsSize)
+            Array.copy(elems, 0, elemsNew, 0, offset)
+            elemsNew(offset) = new HashMap1(key, hash, value, kv)
+            Array.copy(elems, offset, elemsNew, offset + 1, elems.length - offset)
+            new HashTrieMap(bitmap | mask, elemsNew, size + 1)
+          }
+        }
       }
     }
 
