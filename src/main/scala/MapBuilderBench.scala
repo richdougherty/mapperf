@@ -8,14 +8,9 @@ import org.openjdk.jmh.infra._
 import scala.collection.generic.{CanBuildFrom, MapFactory}
 
 @BenchmarkMode(Array(Mode.AverageTime))
-// @Fork(2)
-@Fork(1)
-@Threads(1)
-// @Warmup(iterations = 10)
-@Warmup(iterations = 8)
-@Measurement(iterations = 8)
-//@Measurement(iterations = 10)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
+@Fork(4)
+@Warmup(iterations = 12)
 @State(Scope.Benchmark)
 class MapBuilderBench {
 
@@ -49,11 +44,21 @@ class MapBuilderBench {
     elemMap = elems.toMap
   }
 
+  @Benchmark def mapFactoryBuildWithSizeHint(bh: Blackhole): Unit = {
+    val builder = factoryObj.newBuilder[String,String]
+    builder.sizeHint(size)
+    var i = 0
+    while (i < size) {
+      builder +=(elems(i))
+      i += 1
+    }
+    bh.consume(builder.result())
+  }
+
   @Benchmark def mapFactoryBuildWithoutSizeHint(bh: Blackhole): Unit = {
     val builder = factoryObj.newBuilder[String,String]
     var i = 0
-    val len = elems.length
-    while (i < len) {
+    while (i < size) {
       builder +=(elems(i))
       i += 1
     }

@@ -1,5 +1,3 @@
-import org.apache.commons.math3.stat.descriptive.rank.Percentile
-
 import scala.annotation.tailrec
 import scala.util.Random
 
@@ -72,12 +70,12 @@ object BinProbs {
       var insertions = 0
       @tailrec
       def findInsertionsForNewSize(newSize: Int): Unit = {
-        val samples: Array[Int] = (for (i <- 0 until 10000) yield {
+        val samples: Array[Int] = (for (i <- 0 until 20000) yield {
           val filled: Int = fillBins(filledCount, insertions)
           //println(filled)
           filled
         }).sorted.toArray
-        val sampledNewSize = percentile(samples, 0.75)
+        val sampledNewSize = percentile(samples, 0.01)
         //println(s"filled: $filledCount\tpending: $insertions\tprediction: $sampledNewSize\tgoal:$newSize")
         if (sampledNewSize < newSize) {
           insertions += 1
@@ -93,6 +91,7 @@ object BinProbs {
       }
       //print(s"/* $filledCount */ ")
       println(insertionSizeTable.mkString("Array(", ", ", "),"))
+      //println(insertionSizeTable.mkString("", "\t", ""))
     }
   }
 }

@@ -3,5 +3,8 @@ lazy val root = (project in file("."))
   .settings(
     name := "mapperf",
     scalaVersion := "2.12.4",
-    libraryDependencies += "org.apache.commons" % "commons-math3" % "3.6.1"
+    libraryDependencies ++= Seq(
+      "org.scalatest" %% "scalatest" % "3.0.4" % "test",
+      "org.scalacheck" %% "scalacheck" % "1.13.4" % "test"
+    )
   )

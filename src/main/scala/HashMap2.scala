@@ -38,31 +38,32 @@ final class MapBuilder2[A, B]
   }
 
   override def +=(x: (A, B)): this.type = {
-    val h = x.hashCode
+    val k = x._1
+    val h = k.hashCode
 
     def tryUpdateMap1(): Boolean = {
-      if (h == hash1 && x == kv1) {
+      if (h == hash1 && k == kv1._1) {
         hash1 = h
         kv1 = x
         true
       } else false
     }
     def tryUpdateMap2(): Boolean = {
-      if (tryUpdateMap1()) true else if (h == hash2 && x == kv2) {
+      if (tryUpdateMap1()) true else if (h == hash2 && k == kv2._1) {
         hash2 = h
         kv2 = x
         true
       } else false
     }
     def tryUpdateMap3(): Boolean = {
-      if (tryUpdateMap2()) true else if (h == hash3 && x == kv3) {
+      if (tryUpdateMap2()) true else if (h == hash3 && k == kv3._1) {
         hash3 = h
         kv3 = x
         true
       } else false
     }
     def tryUpdateMap4(): Boolean = {
-      if (tryUpdateMap3()) true else if (h == hash4 && x == kv4) {
+      if (tryUpdateMap3()) true else if (h == hash4 && k == kv4._1) {
         hash4 = h
         kv4 = x
         true
@@ -83,28 +84,28 @@ final class MapBuilder2[A, B]
         hash1 = h // Optimization: could lazily calculate this if needed
         kv1 = x
       case 1 =>
-        assert(kv1 != null)
+        //assert(kv1 != null)
         if (!tryUpdateMap1()) {
           size = 2
           hash2 = h
           kv2 = x
         }
       case 2 =>
-        assert(kv1 != null && kv2 != null)
+        //assert(kv1 != null && kv2 != null)
         if (!tryUpdateMap2()) {
           size = 3
           hash3 = h
           kv3 = x
         }
       case 3 =>
-        assert(kv1 != null && kv2 != null && kv3 != null)
+        //assert(kv1 != null && kv2 != null && kv3 != null)
         if (!tryUpdateMap3()) {
           size = 4
           hash4 = h
           kv4 = x
         }
       case 4 =>
-        assert(kv1 != null && kv2 != null && kv3 != null && kv4 != null, s"$kv1, $kv2, $kv3, $kv4")
+        //assert(kv1 != null && kv2 != null && kv3 != null && kv4 != null, s"$kv1, $kv2, $kv3, $kv4")
         if (!tryUpdateMap4()) {
           // Convert to a HashMap
           size = 0 // Set to 0 since appends will increment this
@@ -127,7 +128,7 @@ final class MapBuilder2[A, B]
           // User has called the `result` method; the hashMap has been cleared to prevent further mutable updates
           throw new IllegalStateException("Clear builder before using again")
         }
-
+        updateHashMap(h, x)
     }
     this
   }
@@ -371,57 +372,63 @@ object HashMap2 extends ImmutableMapFactory[HashMap2] with BitOperations.Int {
     override def tail: HashMap2[Any, Nothing] = throw new NoSuchElementException("Empty Map")
   }
 
+  /** The following size table allows us to predict the trie size needed. The table is tuned to produce
+   *  compact maps. It gives a reasonable size with a <1% chance of overallocating. */
   private val countTable: Array[Array[Int]] = Array(
-    Array(1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 15, 16, 18, 20, 21, 23, 25, 27, 30, 32, 35, 38, 41, 45, 50, 55, 61, 69, 81, 102),
-    Array(1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 14, 15, 17, 19, 20, 22, 24, 26, 29, 31, 34, 37, 41, 44, 49, 54, 61, 69, 80, 102),
-    Array(1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 13, 14, 16, 18, 19, 21, 23, 25, 28, 30, 33, 36, 39, 43, 48, 53, 60, 68, 80, 101),
-    Array(1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 13, 15, 16, 18, 20, 22, 24, 27, 29, 32, 35, 38, 42, 47, 52, 58, 67, 78, 99),
-    Array(1, 2, 3, 4, 5, 6, 8, 9, 11, 12, 14, 15, 17, 19, 21, 23, 26, 28, 31, 34, 37, 41, 46, 51, 57, 66, 77, 97),
-    Array(1, 2, 3, 4, 5, 7, 8, 9, 11, 13, 14, 16, 18, 20, 22, 24, 27, 30, 33, 36, 40, 44, 50, 56, 64, 76, 97),
-    Array(1, 2, 3, 4, 6, 7, 8, 10, 11, 13, 15, 17, 19, 21, 23, 26, 28, 32, 35, 39, 43, 49, 55, 63, 75, 96),
-    Array(1, 2, 3, 4, 6, 7, 9, 10, 12, 14, 16, 17, 20, 22, 25, 27, 30, 34, 38, 42, 47, 54, 62, 73, 95),
-    Array(1, 2, 3, 4, 6, 7, 9, 11, 12, 14, 16, 18, 21, 23, 26, 29, 33, 36, 41, 46, 52, 61, 72, 93),
-    Array(1, 2, 3, 5, 6, 8, 9, 11, 13, 15, 17, 19, 22, 25, 28, 31, 35, 40, 45, 51, 59, 71, 92),
-    Array(1, 2, 3, 5, 6, 8, 10, 12, 14, 16, 18, 21, 23, 27, 30, 34, 38, 43, 50, 58, 70, 91),
-    Array(1, 2, 4, 5, 7, 8, 10, 12, 14, 17, 19, 22, 25, 28, 32, 37, 42, 48, 57, 68, 89),
-    Array(1, 2, 4, 5, 7, 9, 11, 13, 15, 18, 20, 23, 27, 31, 35, 40, 47, 55, 67, 87),
-    Array(1, 2, 4, 6, 7, 9, 11, 14, 16, 19, 22, 25, 29, 33, 39, 45, 54, 65, 86),
-    Array(1, 2, 4, 6, 8, 10, 12, 15, 17, 20, 24, 27, 32, 37, 44, 52, 63, 84),
-    Array(1, 2, 4, 6, 8, 10, 13, 16, 19, 22, 26, 30, 35, 42, 50, 62, 83),
-    Array(1, 3, 4, 6, 9, 11, 14, 17, 20, 24, 28, 34, 40, 48, 60, 80),
-    Array(1, 3, 5, 7, 9, 12, 15, 18, 22, 26, 32, 38, 46, 58, 78),
-    Array(1, 3, 5, 7, 10, 13, 16, 20, 24, 30, 36, 44, 56, 76),
-    Array(1, 3, 5, 8, 11, 14, 18, 22, 27, 34, 42, 54, 75),
-    Array(1, 3, 6, 9, 12, 16, 20, 25, 31, 40, 51, 72),
-    Array(1, 3, 6, 9, 13, 17, 22, 29, 37, 49, 69),
-    Array(1, 4, 7, 10, 15, 20, 26, 34, 46, 67),
-    Array(1, 4, 8, 12, 17, 23, 31, 43, 64),
-    Array(2, 5, 9, 13, 20, 28, 39, 60),
-    Array(2, 5, 10, 16, 24, 35, 56),
-    Array(2, 6, 12, 20, 31, 52),
-    Array(2, 7, 15, 26, 46),
-    Array(3, 9, 20, 40),
-    Array(3, 13, 32),
-    Array(5, 23),
-    Array(10)
+    Array(1, 3, 4, 6, 7, 9, 11, 13, 14, 16, 18, 20, 23, 25, 27, 30, 33, 36, 40, 43, 47, 51, 56, 62, 69, 76, 84, 95, 110, 131, 165, 253),
+    Array(2, 3, 5, 6, 8, 10, 12, 13, 15, 17, 19, 22, 24, 26, 29, 32, 35, 38, 42, 46, 51, 55, 61, 67, 74, 84, 95, 110, 129, 165, 253),
+    Array(2, 4, 5, 7, 9, 10, 12, 14, 16, 18, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 54, 59, 66, 74, 83, 93, 109, 131, 165, 252),
+    Array(2, 4, 6, 8, 9, 11, 13, 15, 17, 19, 22, 24, 27, 30, 33, 36, 40, 44, 48, 53, 58, 65, 73, 81, 93, 107, 129, 163, 253),
+    Array(3, 4, 6, 8, 10, 12, 14, 16, 18, 21, 23, 26, 29, 32, 35, 39, 43, 47, 52, 58, 64, 71, 80, 92, 107, 127, 164, 249),
+    Array(3, 5, 7, 9, 11, 13, 15, 17, 20, 22, 24, 28, 31, 34, 37, 41, 46, 51, 56, 62, 70, 78, 90, 105, 126, 162, 249),
+    Array(3, 5, 7, 9, 11, 13, 16, 18, 21, 23, 26, 29, 33, 36, 41, 45, 50, 55, 61, 69, 78, 89, 104, 125, 160, 244),
+    Array(3, 6, 8, 10, 12, 14, 17, 19, 22, 25, 28, 31, 35, 39, 43, 48, 54, 60, 68, 76, 88, 102, 125, 159, 245),
+    Array(4, 6, 8, 11, 13, 15, 18, 21, 24, 27, 30, 34, 38, 42, 46, 52, 59, 66, 75, 87, 101, 121, 159, 243),
+    Array(4, 7, 9, 11, 14, 16, 19, 22, 25, 29, 32, 37, 40, 46, 51, 58, 65, 73, 85, 100, 121, 157, 242),
+    Array(4, 7, 9, 12, 15, 18, 21, 24, 27, 31, 35, 39, 44, 50, 57, 64, 72, 84, 98, 120, 154, 243),
+    Array(5, 7, 10, 13, 16, 19, 22, 25, 29, 33, 38, 43, 48, 55, 62, 71, 82, 97, 117, 154, 240),
+    Array(5, 8, 11, 14, 17, 20, 24, 27, 31, 36, 41, 47, 53, 60, 69, 81, 96, 116, 151, 242),
+    Array(6, 9, 12, 15, 18, 22, 25, 30, 34, 39, 45, 51, 59, 67, 79, 93, 114, 149, 237),
+    Array(6, 10, 13, 16, 20, 23, 27, 32, 37, 44, 49, 57, 65, 78, 92, 113, 149, 236),
+    Array(6, 10, 14, 18, 21, 25, 30, 35, 41, 48, 55, 65, 76, 91, 111, 146, 231),
+    Array(7, 11, 15, 19, 23, 28, 33, 39, 46, 54, 62, 73, 87, 109, 144, 233),
+    Array(8, 12, 16, 21, 26, 31, 36, 43, 51, 60, 71, 86, 107, 142, 230),
+    Array(9, 13, 18, 23, 27, 33, 40, 48, 58, 68, 83, 106, 138, 227),
+    Array(9, 14, 20, 25, 31, 38, 46, 55, 66, 80, 103, 138, 222),
+    Array(10, 16, 22, 28, 34, 43, 52, 64, 79, 100, 135, 224),
+    Array(11, 18, 24, 31, 40, 49, 60, 75, 97, 132, 222),
+    Array(13, 20, 28, 35, 45, 56, 72, 93, 129, 216),
+    Array(15, 23, 31, 41, 52, 68, 90, 125, 208),
+    Array(17, 26, 36, 49, 65, 86, 121, 212),
+    Array(19, 30, 43, 59, 81, 119, 204),
+    Array(22, 37, 54, 76, 113, 199),
+    Array(27, 46, 68, 105, 192),
+    Array(35, 60, 99, 189),
+    Array(47, 89, 179),
+    Array(72, 163),
+    Array(145)
   )
+  private val updatesForMaxSize = countTable(0)(31)
 
-  private[immutable] def predictCount(existingCount: Int, updatesRemaining: Int): Int = {
-    if (existingCount == 32) 32 else {
-      val row: Array[Int] = countTable(existingCount)
+  private[immutable] def predictCount(size: Int, updates: Int): Int = {
+    if (updates == 0) {
+      size
+    } else if (size == 32 || updates >= updatesForMaxSize) {
+      32
+    } else {
+      val updatesNeededToGrow: Array[Int] = countTable(size)
 
       @tailrec
-      def scan(column: Int): Int = {
-        if (column >= row.length) 32 else {
-          val minUpdates: Int = row(column)
-          if (updatesRemaining >= minUpdates) {
-            existingCount + column + 1
+      def scan(i: Int): Int = {
+        if (i >= updatesNeededToGrow.length) 32 else {
+          val updatesNeeded: Int = updatesNeededToGrow(i)
+          if (updatesNeeded > updates) {
+            size + i
           } else {
-            scan(column + 1)
+            scan(i + 1)
           }
         }
       }
-
       scan(0)
     }
   }
@@ -586,7 +593,7 @@ object HashMap2 extends ImmutableMapFactory[HashMap2] with BitOperations.Int {
 
   @deprecatedInheritance("This class will be made final in a future release.", "2.12.2")
   class HashTrieMap[A, +B](
-    private[collection] val bitmap: Int,
+    private[collection] var bitmap: Int,
     private[collection] val elems: Array[HashMap2[A, B @uV]],
     private[collection] var size0: Int
   ) extends HashMap2[A, B @uV] {
@@ -639,15 +646,26 @@ object HashMap2 extends ImmutableMapFactory[HashMap2] with BitOperations.Int {
       if ((bitmap & mask) != 0) {
         // There is already a HashMap at that index. Pass the update operation down
         // to that HashMap.
-        val sub = elems(offset)
-        val subNew = sub.updated0(key, hash, level + 5, value, kv, mutUpdates, merger)
-        if(subNew eq sub) {
+        val subOld = elems(offset)
+        val subOldSize = subOld.size // Capture old size in case mutable update changes it
+
+        val subNew = subOld.updated0(key, hash, level + 5, value, kv, mutUpdates, merger)
+        val sizeNew = size + (subNew.size - subOldSize)
+
+        if(subNew eq subOld) {
           // The child HashMap is still the same. This can happen if we're doing a mutable update during building
           // or if there was a merge operation that avoided an update.
+          if (mutUpdates == -1) {
+            // If this isn't a mutable update, then it's illegal for the sub object
+            // to mutate its size. Enforce that constraint here.
+            assert(subOldSize == subNew.size)
+          } else {
+            // This is a mutable update so update this object with its new size.
+            size0 = sizeNew
+          }
           this
         } else {
           // The child HashMap at that index has changed.
-          val sizeNew = size + (subNew.size - sub.size)
           if (mutUpdates == -1) {
             // This HashMap is immutable; return a modified copy
             val elemsNew = new Array[HashMap2[A,B1]](elems.length)
@@ -677,12 +695,13 @@ object HashMap2 extends ImmutableMapFactory[HashMap2] with BitOperations.Int {
           val elemsUsed = Integer.bitCount(bitmap)
           val elemsNeeded = elemsUsed + 1
           if (elemsNeeded < elems.length) {
-            // There is space to update the existing array. Move the exising elements
+            // There is space to update the existing array. Move the existing elements
             // to make space, then add the new element.
             //System.err.println(s"${elems.length}, $elemsUsed, $offset")
             Array.copy(elems, offset, elems, offset + 1, elemsUsed - offset)
             val elemsNew = elems.asInstanceOf[Array[HashMap2[A,B1]]]
             elemsNew(offset) = new HashMap1(key, hash, value, kv)
+            bitmap |= mask
             size0 = size + 1
             this
           } else {
@@ -782,8 +801,10 @@ object HashMap2 extends ImmutableMapFactory[HashMap2] with BitOperations.Int {
       }
     }
 
-    override def iterator: Iterator[(A, B)] = new TrieIterator[(A, B)](elems.asInstanceOf[Array[Iterable[(A, B)]]]) {
-      final override def getElem(cc: AnyRef): (A, B) = cc.asInstanceOf[HashMap1[A, B]].ensurePair
+    override def iterator: Iterator[(A, B)] = {
+      new TrieIterator2[(A, B)](elems.asInstanceOf[Array[Iterable[(A, B)]]]) {
+        final override def getElem(cc: AnyRef): (A, B) = cc.asInstanceOf[HashMap1[A, B]].ensurePair
+      }
     }
 
     override def foreach[U](f: ((A, B)) => U): Unit = {
